@@ -1,8 +1,10 @@
-sentence-transformers
-huggingface-hub
-faiss-cpu
-pandas
-python-dotenv
-uvicorn
-fastapi
-google-generativeai
+fastapi==0.115.0
+uvicorn==0.30.6
+sentence-transformers==3.0.1
+transformers==4.43.3  # Critical fix
+faiss-cpu==1.8.0
+pandas==2.2.2
+numpy==1.26.4
+google-generativeai==0.8.1
+python-dotenv==1.0.1
+huggingface-hub==0.25.1
