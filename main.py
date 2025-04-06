@@ -27,10 +27,7 @@ app = FastAPI(title="SHL Assessment Search API")
 
 # LLM preprocessing
 def llm_shorten_query(query: str) -> str:
-    prompt = (
-        "Shorten the given line (or word, don't do anything if it's already short), "
-        "retaining the key skills, test type, and duration preferences, in minimal words. Line: "
-    )
+    prompt = "I want to search my vector database with the query you will recieve, your task is to just summarize the query (maximum 10 words) only retaining technical skills. Query: "
     try:
         response = model.generate_content(prompt + query)
         return response.text.strip()
@@ -41,16 +38,12 @@ def llm_shorten_query(query: str) -> str:
 def retrieve_assessments(query: str, k: int = 10, max_duration: Optional[int] = None):
     query_lower = query.lower()
     wants_flexible = any(x in query_lower for x in ["untimed", "variable", "flexible"])
-
     processed_query = llm_shorten_query(query)
-
     query_embedding = embedding_model.encode([processed_query], show_progress_bar=False)[0]
     query_embedding = np.array([query_embedding], dtype="float32")
-
     distances, indices = index.search(query_embedding, k * 2)
     results = df.iloc[indices[0]].copy()
     results["similarity_score"] = 1 - distances[0] / 2
-
     if max_duration is not None or wants_flexible:
         filtered = []
         for _, row in results.iterrows():
@@ -62,12 +55,10 @@ def retrieve_assessments(query: str, k: int = 10, max_duration: Optional[int] = 
             elif isinstance(duration, float) and max_duration is not None and duration <= max_duration:
                 filtered.append(row)
         results = pd.DataFrame(filtered) if filtered else results
-
     results = results.rename(columns={
         "Pre-packaged Job Solutions": "Assessment Name",
         "Assessment Length": "Duration"
     })
-
     return results[[
         "Assessment Name",
         "URL",
@@ -77,14 +68,15 @@ def retrieve_assessments(query: str, k: int = 10, max_duration: Optional[int] = 
         "Test Type"
     ]].head(k).to_dict(orient="records")
 
-
 # FastAPI endpoint
-@app.get("/search")
-def search(query: str = Query(..., description="Your search text"),
-           k: int = Query(5, description="Number of results to return"),
-           max_duration: Optional[int] = Query(None, description="Max duration filter in minutes")):
+@app.get("/recommend")  # Changed to /recommend for consistency
+def recommend(query: str = Query(..., description="Your search text"),
+              k: int = Query(5, description="Number of results to return"),
+              max_duration: Optional[int] = Query(None, description="Max duration filter in minutes")):
     try:
         results = retrieve_assessments(query, k=k, max_duration=max_duration)
         return {"results": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Render runs via uvicorn main:app --host 0.0.0.0 --port $PORT
