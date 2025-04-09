@@ -70,13 +70,14 @@ def retrieve_assessments(query: str, k: int = 10, max_duration: Optional[int] = 
         "Assessment Length": "Duration"
     })
     return results[[
-        "Assessment Name",
-        "URL",
-        "Remote Testing (y/n)",
-        "Adaptive/IRT (y/n)",
-        "Duration",
-        "Test Type"
-    ]].head(k).to_dict(orient="records")
+    "Assessment Name",
+    "URL",
+    "Remote Testing (y/n)",
+    "Adaptive/IRT (y/n)",
+    "Duration",
+    "Test Type",
+    "Description"  # Added this
+]].head(k).to_dict(orient="records")
 
 @app.post("/recommend")
 def recommend(request: QueryRequest):
@@ -94,20 +95,19 @@ def recommend(request: QueryRequest):
             "S": "Simulations"
         }
         formatted_results = [
-            {
-                "url": result["URL"],
-                "adaptive_support": result["Adaptive/IRT (y/n)"],
-                "description": result["Assessment Name"],
-                "duration": result["Duration"],
-                "remote_support": result["Remote Testing (y/n)"],
-                # Split Test Type string (if multiple) and map to full names
-                "test_type": [test_type_map.get(abbrev.strip(), abbrev.strip()) 
-                            for abbrev in result["Test Type"].split(",")] 
-                            if pd.notna(result["Test Type"]) else []
-            }
-            for result in results
-        ]
-        return {"recommended_assessments": formatted_results}
+        {
+            "url": result["URL"],
+            "adaptive_support": result["Adaptive/IRT (y/n)"],
+            "description": result["Description"],  # Now works with updated return
+            "duration": result["Duration"],
+            "remote_support": result["Remote Testing (y/n)"],
+            "test_type": [test_type_map.get(abbrev.strip(), abbrev.strip()) 
+                          for abbrev in result["Test Type"].split()] 
+                          if pd.notna(result["Test Type"]) else []
+        }
+        for result in results
+    ]
+    return {"recommended_assessments": formatted_results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
