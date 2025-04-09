@@ -2,7 +2,8 @@ import os
 import faiss
 import pandas as pd
 import numpy as np
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
 from typing import Optional
 from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
@@ -25,16 +26,25 @@ index = faiss.read_index("shl_assessments_index.faiss")
 
 app = FastAPI(title="SHL Assessment Search API")
 
+# Health check endpoint
+@app.get("/health")
+def health_check():
+    return {"status": "healthy"}
+
+# Request model for POST
+class QueryRequest(BaseModel):
+    query: str
+
 # LLM preprocessing
 def llm_shorten_query(query: str) -> str:
-    prompt = "I want to search my vector database with the query you will recieve, your task is to just summarize the query (maximum 10 words) only retaining technical skills. Query: "
+    prompt = "Summarize query (max 10 words) retaining technical skills: "
     try:
         response = model.generate_content(prompt + query)
         return response.text.strip()
     except Exception:
         return query
 
-# Retrieval logic
+# Retrieval logic (unchanged)
 def retrieve_assessments(query: str, k: int = 10, max_duration: Optional[int] = None):
     query_lower = query.lower()
     wants_flexible = any(x in query_lower for x in ["untimed", "variable", "flexible"])
@@ -68,15 +78,39 @@ def retrieve_assessments(query: str, k: int = 10, max_duration: Optional[int] = 
         "Test Type"
     ]].head(k).to_dict(orient="records")
 
-# FastAPI endpoint
-@app.get("/recommend")  # Changed to /recommend for consistency
-def recommend(query: str = Query(..., description="Your search text"),
-              k: int = Query(5, description="Number of results to return"),
-              max_duration: Optional[int] = Query(None, description="Max duration filter in minutes")):
+@app.post("/recommend")
+def recommend(request: QueryRequest):
     try:
-        results = retrieve_assessments(query, k=k, max_duration=max_duration)
-        return {"results": results}
+        results = retrieve_assessments(request.query, k=10)
+        # Mapping of abbreviations to full test type descriptions
+        test_type_map = {
+            "A": "Ability & Aptitude",
+            "B": "Biodata & Situational Judgement",
+            "C": "Competencies",
+            "D": "Development & 360",
+            "E": "Assessment Exercises",
+            "K": "Knowledge & Skills",
+            "P": "Personality & Behavior",
+            "S": "Simulations"
+        }
+        formatted_results = [
+            {
+                "url": result["URL"],
+                "adaptive_support": result["Adaptive/IRT (y/n)"],
+                "description": result["Assessment Name"],
+                "duration": result["Duration"],
+                "remote_support": result["Remote Testing (y/n)"],
+                # Split Test Type string (if multiple) and map to full names
+                "test_type": [test_type_map.get(abbrev.strip(), abbrev.strip()) 
+                            for abbrev in result["Test Type"].split(",")] 
+                            if pd.notna(result["Test Type"]) else []
+            }
+            for result in results
+        ]
+        return {"recommended_assessments": formatted_results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# Render runs via uvicorn main:app --host 0.0.0.0 --port $PORT
+
+
+# Render runs via uvicorn app:app --host 0.0.0.0 --port $PORT
