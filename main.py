@@ -4,7 +4,6 @@ import pandas as pd
 import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from typing import Optional
 from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -17,7 +16,7 @@ if not GEMINI_API_KEY:
 
 # Configure Gemini and models
 genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+model = genai.GenerativeModel("gemini-1.5-pro")  # Match Streamlit
 
 # Load models and data
 embedding_model = SentenceTransformer("all-MiniLM-L6-v2")
@@ -37,34 +36,23 @@ class QueryRequest(BaseModel):
 
 # LLM preprocessing
 def llm_shorten_query(query: str) -> str:
-    prompt = "Summarize query (max 10 words) retaining technical skills: "
+    prompt = "Extract all technical skills from query as space-separated list, max 10: "
     try:
         response = model.generate_content(prompt + query)
-        return response.text.strip()
+        shortened = response.text.strip()
+        words = shortened.split()
+        return " ".join(words[:10]) if words else query
     except Exception:
         return query
 
-# Retrieval logic
-def retrieve_assessments(query: str, k: int = 10, max_duration: Optional[int] = None):
-    query_lower = query.lower()
-    wants_flexible = any(x in query_lower for x in ["untimed", "variable", "flexible"])
+# Simplified retrieval logic
+def retrieve_assessments(query: str, k: int = 10):
     processed_query = llm_shorten_query(query)
     query_embedding = embedding_model.encode([processed_query], show_progress_bar=False)[0]
     query_embedding = np.array([query_embedding], dtype="float32")
-    distances, indices = index.search(query_embedding, k * 2)
+    distances, indices = index.search(query_embedding, k)
     results = df.iloc[indices[0]].copy()
     results["similarity_score"] = 1 - distances[0] / 2
-    if max_duration is not None or wants_flexible:
-        filtered = []
-        for _, row in results.iterrows():
-            duration = row["Assessment Length Parsed"]
-            if pd.isna(duration):
-                filtered.append(row)
-            elif duration == "flexible duration" and wants_flexible:
-                filtered.append(row)
-            elif isinstance(duration, float) and max_duration is not None and duration <= max_duration:
-                filtered.append(row)
-        results = pd.DataFrame(filtered) if filtered else results
     results = results.rename(columns={
         "Pre-packaged Job Solutions": "Assessment Name",
         "Assessment Length": "Duration"
@@ -107,7 +95,7 @@ def recommend(request: QueryRequest):
             }
             for result in results
         ]
-        return {"recommended_assessments": formatted_results}  # Moved inside try
+        return {"recommended_assessments": formatted_results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
